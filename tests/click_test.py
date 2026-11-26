@@ -70,7 +70,8 @@ def name(c):
 
 def mouse(flags):
     i = INPUT(type=0, mi=MOUSEINPUT(0, 0, 0, flags, 0, 0))
-    user32.SendInput(1, ctypes.byref(i), ctypes.sizeof(INPUT))
+    n = user32.SendInput(1, ctypes.byref(i), ctypes.sizeof(INPUT))
+    print(f"    SendInput {flags:#x} → {n} (err {ctypes.get_last_error()})")
 
 
 def watch(label, seconds):
@@ -85,7 +86,7 @@ def watch(label, seconds):
     return seen
 
 
-user32.SetCursorPos(600, 400)
+print("SetCursorPos:", user32.SetCursorPos(600, 400), ctypes.get_last_error())
 time.sleep(0.5)
 print("켜기 전:", name(now_cursor()))
 
