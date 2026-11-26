@@ -1,0 +1,56 @@
+# 코드를 올릴 때마다 GitHub의 Windows 컴퓨터에서 PhotoCursor.exe 를 만들고,
+# 점검한 뒤, Releases 에 PhotoCursor.zip 으로 올립니다.
+name: Build PhotoCursor
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install build tools
+        run: python -m pip install --upgrade pip pillow pyinstaller
+
+      - name: Build exe
+        run: pyinstaller --onefile --noconsole --name PhotoCursor --exclude-module tkinter photo_cursor.py
+
+      - name: Check exe on Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force check | Out-Null
+          Copy-Item dist/PhotoCursor.exe, normal.png, click.png, settings.txt check/
+          $p = Start-Process -FilePath check/PhotoCursor.exe -ArgumentList "--check" -WorkingDirectory check -Wait -PassThru
+          Get-Content check/check_result.txt -Encoding utf8
+          if ($p.ExitCode -ne 0) { throw "점검 실패 (exit $($p.ExitCode))" }
+
+      - name: Package zip
+        run: |
+          python -c "import zipfile; z=zipfile.ZipFile('PhotoCursor.zip','w',zipfile.ZIP_DEFLATED); [z.write(s, 'PhotoCursor/'+d) for s,d in [('dist/PhotoCursor.exe','PhotoCursor.exe'),('settings.txt','settings.txt'),('normal.png','normal.png'),('click.png','click.png'),('README.txt','README.txt')]]; z.close()"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhotoCursor
+          path: PhotoCursor.zip
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: PhotoCursor v${{ github.run_number }}
+          files: PhotoCursor.zip
+          make_latest: true
+          body: |
+            **PhotoCursor.zip** 을 받아 압축을 풀고 PhotoCursor.exe 를 실행하세요.
+            사용법은 저장소 첫 화면(README)에 있어요.

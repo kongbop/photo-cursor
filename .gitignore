@@ -1,0 +1,6 @@
+cursors/
+__pycache__/
+build/
+dist/
+*.spec
+check_result.txt
