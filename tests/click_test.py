@@ -44,12 +44,17 @@ kernel32.OpenEventW.restype = wt.HANDLE
 kernel32.SetEvent.argtypes = [wt.HANDLE]
 
 
+user32.LoadCursorW.argtypes = [wt.HINSTANCE, ctypes.c_void_p]
+user32.LoadCursorW.restype = wt.HANDLE
+
+
 def now_cursor():
-    ci = CURSORINFO(cbSize=ctypes.sizeof(CURSORINFO))
-    if not user32.GetCursorInfo(ctypes.byref(ci)) or not ci.hCursor:
+    # 화면에 보이는 커서 대신, Windows가 기억하는 '기본 화살표' 커서의 지금 모양
+    h = user32.LoadCursorW(None, 32512)
+    if not h:
         return None
     ii = ICONINFO()
-    if not user32.GetIconInfo(ci.hCursor, ctypes.byref(ii)):
+    if not user32.GetIconInfo(h, ctypes.byref(ii)):
         return None
     for b in (ii.mask, ii.color):
         if b:
