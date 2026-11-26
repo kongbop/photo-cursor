@@ -229,6 +229,21 @@ def main():
     user32.MessageBoxW.argtypes = [wt.HWND, wt.LPCWSTR, wt.LPCWSTR, wt.UINT]
     user32.MessageBoxW.restype = ctypes.c_int
     kernel32.GetCurrentThreadId.restype = wt.DWORD
+
+    class CURSORINFO(ctypes.Structure):
+        _fields_ = [("cbSize", wt.DWORD), ("flags", wt.DWORD), ("hCursor", wt.HANDLE), ("pt", wt.POINT)]
+
+    user32.GetCursorInfo.argtypes = [ctypes.POINTER(CURSORINFO)]
+    user32.GetCursorPos.argtypes = [ctypes.POINTER(wt.POINT)]
+    user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+    user32.SetCursor.argtypes = [wt.HANDLE]
+    user32.SetCursor.restype = wt.HANDLE
+    user32.GetForegroundWindow.restype = wt.HWND
+    user32.GetWindowThreadProcessId.argtypes = [wt.HWND, ctypes.POINTER(wt.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wt.DWORD
+    user32.AttachThreadInput.argtypes = [wt.DWORD, wt.DWORD, wt.BOOL]
+    user32.AttachThreadInput.restype = wt.BOOL
+    user32.PeekMessageW.argtypes = [ctypes.POINTER(wt.MSG), wt.HWND, wt.UINT, wt.UINT, wt.UINT]
     kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wt.BOOL, wt.LPCWSTR]
     kernel32.CreateMutexW.restype = wt.HANDLE
     kernel32.CreateEventW.argtypes = [ctypes.c_void_p, wt.BOOL, wt.BOOL, wt.LPCWSTR]
@@ -328,6 +343,30 @@ def main():
                 ok &= bool(r)
             return ok
 
+    def refresh_screen():
+        """커서 그림을 바꿔도 Windows는 마우스가 움직이기 전까지 화면에 예전 그림을 보여 줌.
+        그래서 지금 보이는 커서를 다시 그리게 만든다."""
+        ci = CURSORINFO(cbSize=ctypes.sizeof(CURSORINFO))
+        shown = ci.hCursor if user32.GetCursorInfo(ctypes.byref(ci)) else None
+        attached = False
+        # 1) 지금 앞에 있는 창의 입력에 잠깐 연결해서, 같은 커서를 다시 설정 → 바로 다시 그려짐
+        #    (마우스를 누르고 있는 동안처럼 창이 마우스를 붙잡고 있을 때도 통함)
+        me = kernel32.GetCurrentThreadId()
+        fg = user32.GetForegroundWindow()
+        tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+        if shown and tid and tid != me:
+            attached = bool(user32.AttachThreadInput(me, tid, True))
+            if attached:
+                user32.SetCursor(None)
+                user32.SetCursor(shown)
+                user32.AttachThreadInput(me, tid, False)
+        # 2) 마우스를 제자리로 한 번 옮겨서, 창이 커서를 새로 고르게 함
+        pt = wt.POINT()
+        if user32.GetCursorPos(ctypes.byref(pt)):
+            user32.SetCursorPos(pt.x, pt.y)
+        if debug_path:
+            log(f"refresh shown={bool(shown)} attach={attached}")
+
     # 자동 점검: 커서를 한 번 바꿔 보고 되돌린 뒤 종료
     if check_mode:
         a = set_cursor("normal")
@@ -349,6 +388,7 @@ def main():
     q = queue.Queue()
 
     def worker():
+        user32.PeekMessageW(ctypes.byref(wt.MSG()), None, 0, 0, 0)   # 이 스레드에 입력 큐 만들기
         pressed = False
         expired = True
         gen = 0
@@ -363,15 +403,18 @@ def main():
                 expired = False
                 gen += 1
                 set_cursor("click")
+                refresh_screen()
                 threading.Timer(click_time, q.put, args=(("timeout", gen),)).start()
             elif cmd == "up":
                 pressed = False
                 if hold and expired:
                     set_cursor("normal")
+                refresh_screen()      # 손을 떼면 창이 마우스를 놓아 주므로 한 번 더 다시 그리기
             elif cmd == "timeout" and arg == gen:
                 expired = True
                 if not (hold and pressed):
                     set_cursor("normal")
+                    refresh_screen()
 
     t = threading.Thread(target=worker, daemon=True)
     t.start()
