@@ -33,7 +33,7 @@ class MOUSEINPUT(ctypes.Structure):
 
 
 class INPUT(ctypes.Structure):
-    _fields_ = [("type", wt.DWORD), ("mi", MOUSEINPUT), ("_pad", ctypes.c_byte * 8)]
+    _fields_ = [("type", wt.DWORD), ("mi", MOUSEINPUT)]
 
 
 user32.GetIconInfo.argtypes = [wt.HANDLE, ctypes.POINTER(ICONINFO)]
