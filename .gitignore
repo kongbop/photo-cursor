@@ -4,3 +4,4 @@ build/
 dist/
 *.spec
 check_result.txt
+_version.py

@@ -12,8 +12,13 @@ import sys
 import struct
 import queue
 import threading
+import time
 
 APP = "사진 커서"
+try:
+    from _version import VERSION        # GitHub에서 exe를 만들 때 자동으로 적힘
+except ImportError:
+    VERSION = "개발판"
 
 # exe로 묶였을 때는 exe가 있는 폴더, 아니면 이 .py 파일이 있는 폴더
 if getattr(sys, "frozen", False):
@@ -282,6 +287,7 @@ def main():
     kernel32.CreateEventW.argtypes = [ctypes.c_void_p, wt.BOOL, wt.BOOL, wt.LPCWSTR]
     kernel32.CreateEventW.restype = wt.HANDLE
     kernel32.SetEvent.argtypes = [wt.HANDLE]
+    kernel32.ResetEvent.argtypes = [wt.HANDLE]
     kernel32.WaitForSingleObject.argtypes = [wt.HANDLE, wt.DWORD]
     kernel32.WaitForSingleObject.restype = wt.DWORD
 
@@ -302,13 +308,23 @@ def main():
     quit_event = kernel32.CreateEventW(None, True, False, "Local\\PhotoCursorQuit")
     mutex = kernel32.CreateMutexW(None, False, "Local\\PhotoCursorRunning")
     if ctypes.get_last_error() == 183 and not check_mode:   # ERROR_ALREADY_EXISTS
-        ans = user32.MessageBoxW(None, "사진 커서가 이미 켜져 있어요.\n끌까요?", APP, MB_YESNO_Q)
-        if ans == IDYES:
-            kernel32.SetEvent(quit_event)
+        ans = user32.MessageBoxW(
+            None,
+            "사진 커서가 이미 켜져 있어요.\n\n"
+            "예: 껐다가 다시 켜기 (바꾼 설정·사진·새 버전 적용)\n"
+            "아니요: 끄기\n"
+            "취소: 그대로 두기",
+            APP, 0x03 | 0x20 | 0x40000)                       # 예/아니요/취소
+        if ans in (IDYES, 7):                                # 7 = 아니요
+            kernel32.SetEvent(quit_event)                    # 켜져 있던 것에게 끄라고 신호
+            time.sleep(1.0)                                  # 꺼질 때까지 잠깐 기다림
+            kernel32.ResetEvent(quit_event)
             restore_cursors()
-        return 0
+        if ans != IDYES:
+            return 0
 
     # ── 1) 설정 읽기 ──
+    had_settings = os.path.exists(SETTINGS_FILE)
     cfg = load_settings()
     size = int(as_num(cfg["SIZE"], 64, 16, 256, int))
     click_time = as_num(cfg["CLICK_TIME"], 0.3, 0.02, 10)
@@ -319,11 +335,17 @@ def main():
     right_too = as_bool(cfg["RIGHT_CLICK_TOO"])
     show_start = as_bool(cfg["SHOW_START_MESSAGE"])
     if as_bool(cfg["DEBUG"]) and not dbg[0]:
-        dbg[0] = os.path.join(HERE, "debug.txt")
-        try:
-            open(dbg[0], "w", encoding="utf-8").close()     # 켤 때마다 새로 적기
-        except OSError:
-            dbg[0] = None
+        # exe 옆에 못 쓰면(폴더 보호 등) 내 컴퓨터의 앱 데이터 폴더에 씀
+        for folder in (HERE, os.path.join(os.environ.get("LOCALAPPDATA") or HERE, "PhotoCursor")):
+            try:
+                os.makedirs(folder, exist_ok=True)
+                path = os.path.join(folder, "debug.txt")
+                open(path, "w", encoding="utf-8").close()     # 켤 때마다 새로 적기
+                dbg[0] = path
+                break
+            except OSError:
+                continue
+    log(f"사진 커서 {VERSION} / 폴더: {HERE}")
     log(f"설정: 크기 {size}, 클릭 시간 {click_time}, 불투명도 {opacity}/{click_opacity}, 기준점 {hotspot}")
 
     # ── 2) 사진 → 커서 파일 만들기 ──
@@ -507,7 +529,11 @@ def main():
 
     if show_start:
         how = "Ctrl + Alt + Q" if hotkey_ok else "PhotoCursor.exe 한 번 더 실행 → 예"
-        msg = f"사진 커서가 켜졌어요.\n\n끄기: {how}"
+        msg = (f"사진 커서 {VERSION} 가 켜졌어요.\n\n끄기: {how}\n\n"
+               f"설정 파일: {SETTINGS_FILE}"
+               f"{'' if had_settings else '  (없어서 새로 만들었어요)'}\n"
+               f"크기 {size} · 불투명도 {opacity}/{click_opacity} · 기준점 {cfg['HOTSPOT']}\n"
+               f"문제 기록: {dbg[0] or '꺼짐'}")
         if not hotkey_ok:
             msg += "\n(Ctrl + Alt + Q 는 다른 프로그램이 쓰고 있어서 못 써요)"
         # 알림 창이 떠 있는 동안에도 마우스 감지가 멈추지 않게 따로 띄움

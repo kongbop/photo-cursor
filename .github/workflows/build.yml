@@ -23,6 +23,10 @@ jobs:
       - name: Install build tools
         run: python -m pip install --upgrade pip pillow pyinstaller
 
+      - name: Write version
+        shell: pwsh
+        run: Set-Content -Path _version.py -Value 'VERSION = "v${{ github.run_number }}"' -Encoding utf8
+
       - name: Build exe
         run: pyinstaller --onefile --noconsole --name PhotoCursor --exclude-module tkinter photo_cursor.py
 
