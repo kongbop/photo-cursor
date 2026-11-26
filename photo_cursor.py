@@ -181,8 +181,16 @@ def main():
     check_mode = "--check" in sys.argv          # 자동 점검용: 창 없이 확인만 하고 종료
     log_lines = []
 
+    debug_path = os.environ.get("PHOTOCURSOR_DEBUG")
+
     def log(msg):
         log_lines.append(msg)
+        if debug_path:
+            try:
+                with open(debug_path, "a", encoding="utf-8") as f:
+                    f.write(msg + "\n")
+            except OSError:
+                pass
         try:
             print(msg)
         except Exception:
@@ -313,7 +321,11 @@ def main():
         with lock:
             ok = True
             for cid, key in slots.items():
-                ok &= bool(user32.SetSystemCursor(user32.CopyIcon(cursors["click" if mode == "click" else key]), cid))
+                c = user32.CopyIcon(cursors["click" if mode == "click" else key])
+                r = user32.SetSystemCursor(c, cid)
+                if debug_path:
+                    log(f"set {mode} slot={cid} copy={bool(c)} ok={bool(r)} err={ctypes.get_last_error()}")
+                ok &= bool(r)
             return ok
 
     # 자동 점검: 커서를 한 번 바꿔 보고 되돌린 뒤 종료
@@ -342,6 +354,8 @@ def main():
         gen = 0
         while True:
             cmd, arg = q.get()
+            if debug_path:
+                log(f"worker got {cmd} {arg}")
             if cmd == "quit":
                 break
             if cmd == "down":
@@ -368,6 +382,8 @@ def main():
 
     @HOOKPROC
     def mouse_proc(n, wparam, lparam):
+        if debug_path and wparam != 0x0200:
+            log(f"hook n={n} msg={wparam:#x}")
         if n == 0:
             if wparam in DOWN:
                 q.put(("down", None))

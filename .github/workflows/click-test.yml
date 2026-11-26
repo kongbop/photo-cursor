@@ -21,4 +21,7 @@ jobs:
           Copy-Item dist/PhotoCursor.exe, normal.png, click.png t/
           (Get-Content settings.txt -Encoding utf8) -replace '^SHOW_START_MESSAGE = .*','SHOW_START_MESSAGE = no' | Set-Content t/settings.txt -Encoding utf8
           $env:PYTHONIOENCODING = "utf-8"
-          python tests/click_test.py "$PWD\t"
+          $env:PHOTOCURSOR_DEBUG = "$PWD\debug.log"
+          python tests/click_test.py "$PWD\t"; $code = $LASTEXITCODE
+          "---- debug.log ----"; Get-Content debug.log -Encoding utf8 -ErrorAction SilentlyContinue
+          exit $code
