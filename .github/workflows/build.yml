@@ -40,9 +40,11 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force t | Out-Null
           Copy-Item dist/PhotoCursor.exe, normal.png, click.png t/
-          (Get-Content settings.txt -Encoding utf8) -replace '^SHOW_START_MESSAGE = .*','SHOW_START_MESSAGE = no' | Set-Content t/settings.txt -Encoding utf8
+          (Get-Content settings.txt -Encoding utf8) -replace '^SHOW_START_MESSAGE = .*','SHOW_START_MESSAGE = no' -replace '^DEBUG = .*','DEBUG = yes' | Set-Content t/settings.txt -Encoding utf8
           $env:PYTHONIOENCODING = "utf-8"
-          python tests/click_test.py "$PWD\t"
+          python tests/click_test.py "$PWD\t"; $code = $LASTEXITCODE
+          "---- debug.txt ----"; Get-Content t/debug.txt -Encoding utf8 -ErrorAction SilentlyContinue
+          exit $code
 
       - name: Package zip
         run: |

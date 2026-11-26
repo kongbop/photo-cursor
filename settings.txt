@@ -40,3 +40,7 @@ RIGHT_CLICK_TOO = yes
 
 # [시작 알림] yes 면 켤 때 "켜졌어요" 창을 띄워요. 귀찮으면 no.
 SHOW_START_MESSAGE = yes
+
+# [문제 기록] yes 면 이 폴더에 debug.txt 를 만들어, 클릭할 때마다 무슨 일이 있었는지 적어요.
+# 잘 안 될 때 원인을 찾는 용도예요. 평소에는 no.
+DEBUG = no

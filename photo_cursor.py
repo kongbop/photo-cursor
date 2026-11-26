@@ -36,6 +36,7 @@ DEFAULTS = {
     "HOLD_WHILE_PRESSED": "no",
     "RIGHT_CLICK_TOO": "yes",
     "SHOW_START_MESSAGE": "yes",
+    "DEBUG": "no",
 }
 
 SETTINGS_TEMPLATE = """\
@@ -81,6 +82,10 @@ RIGHT_CLICK_TOO = yes
 
 # [시작 알림] yes 면 켤 때 "켜졌어요" 창을 띄워요. 귀찮으면 no.
 SHOW_START_MESSAGE = yes
+
+# [문제 기록] yes 면 이 폴더에 debug.txt 를 만들어, 클릭할 때마다 무슨 일이 있었는지 적어요.
+# 잘 안 될 때 원인을 찾는 용도예요. 평소에는 no.
+DEBUG = no
 """
 
 
@@ -181,13 +186,13 @@ def main():
     check_mode = "--check" in sys.argv          # 자동 점검용: 창 없이 확인만 하고 종료
     log_lines = []
 
-    debug_path = os.environ.get("PHOTOCURSOR_DEBUG")
+    dbg = [os.environ.get("PHOTOCURSOR_DEBUG")]     # 기록 파일 경로 (없으면 기록 안 함)
 
     def log(msg):
         log_lines.append(msg)
-        if debug_path:
+        if dbg[0]:
             try:
-                with open(debug_path, "a", encoding="utf-8") as f:
+                with open(dbg[0], "a", encoding="utf-8") as f:
                     f.write(msg + "\n")
             except OSError:
                 pass
@@ -244,6 +249,34 @@ def main():
     user32.AttachThreadInput.argtypes = [wt.DWORD, wt.DWORD, wt.BOOL]
     user32.AttachThreadInput.restype = wt.BOOL
     user32.PeekMessageW.argtypes = [ctypes.POINTER(wt.MSG), wt.HWND, wt.UINT, wt.UINT, wt.UINT]
+
+    class ICONINFO(ctypes.Structure):
+        _fields_ = [("fIcon", wt.BOOL), ("x", wt.DWORD), ("y", wt.DWORD),
+                    ("mask", wt.HBITMAP), ("color", wt.HBITMAP)]
+
+    gdi32 = ctypes.WinDLL("gdi32")
+    user32.GetIconInfo.argtypes = [wt.HANDLE, ctypes.POINTER(ICONINFO)]
+    gdi32.GetBitmapBits.argtypes = [wt.HBITMAP, wt.LONG, ctypes.c_void_p]
+    gdi32.GetBitmapBits.restype = wt.LONG
+    gdi32.DeleteObject.argtypes = [wt.HANDLE]
+    user32.LoadCursorW.argtypes = [wt.HINSTANCE, ctypes.c_void_p]
+    user32.LoadCursorW.restype = wt.HANDLE
+    user32.GetClassNameW.argtypes = [wt.HWND, wt.LPWSTR, ctypes.c_int]
+
+    def fingerprint(h):
+        """커서 그림의 지문 (같은 그림이면 같은 숫자)"""
+        import zlib
+        ii = ICONINFO()
+        if not h or not user32.GetIconInfo(h, ctypes.byref(ii)):
+            return None
+        crc = zlib.crc32(struct.pack("<II", ii.x, ii.y))
+        for b in (ii.color, ii.mask):
+            if b:
+                buf = ctypes.create_string_buffer(256 * 256 * 4 * 2)
+                n = gdi32.GetBitmapBits(b, len(buf), buf)
+                crc = zlib.crc32(buf.raw[:max(0, n)], crc)
+                gdi32.DeleteObject(b)
+        return crc
     kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wt.BOOL, wt.LPCWSTR]
     kernel32.CreateMutexW.restype = wt.HANDLE
     kernel32.CreateEventW.argtypes = [ctypes.c_void_p, wt.BOOL, wt.BOOL, wt.LPCWSTR]
@@ -285,6 +318,12 @@ def main():
     hold = as_bool(cfg["HOLD_WHILE_PRESSED"])
     right_too = as_bool(cfg["RIGHT_CLICK_TOO"])
     show_start = as_bool(cfg["SHOW_START_MESSAGE"])
+    if as_bool(cfg["DEBUG"]) and not dbg[0]:
+        dbg[0] = os.path.join(HERE, "debug.txt")
+        try:
+            open(dbg[0], "w", encoding="utf-8").close()     # 켤 때마다 새로 적기
+        except OSError:
+            dbg[0] = None
     log(f"설정: 크기 {size}, 클릭 시간 {click_time}, 불투명도 {opacity}/{click_opacity}, 기준점 {hotspot}")
 
     # ── 2) 사진 → 커서 파일 만들기 ──
@@ -324,6 +363,16 @@ def main():
         cursors[key] = h
     log(f"커서 준비 완료: {', '.join(cursors)}")
 
+    prints = {fingerprint(h): key for key, h in cursors.items()}
+
+    def on_screen():
+        ci = CURSORINFO(cbSize=ctypes.sizeof(CURSORINFO))
+        if not user32.GetCursorInfo(ctypes.byref(ci)):
+            return f"읽기 실패(err {ctypes.get_last_error()})"
+        if not ci.hCursor:
+            return f"커서 숨김(flags {ci.flags})"
+        return prints.get(fingerprint(ci.hCursor), "Windows 다른 커서")
+
     slots = {32512: "normal"}                 # 기본 화살표
     if "text" in cursors:
         slots[32513] = "text"                 # I자(글자)
@@ -338,8 +387,9 @@ def main():
             for cid, key in slots.items():
                 c = user32.CopyIcon(cursors["click" if mode == "click" else key])
                 r = user32.SetSystemCursor(c, cid)
-                if debug_path:
-                    log(f"set {mode} slot={cid} copy={bool(c)} ok={bool(r)} err={ctypes.get_last_error()}")
+                if dbg[0]:
+                    now = prints.get(fingerprint(user32.LoadCursorW(None, cid)), "다른 그림")
+                    log(f"{mode} 로 바꾸기 (자리 {cid}): {'성공' if r else '실패'} err={ctypes.get_last_error()} → 저장된 그림: {now}")
                 ok &= bool(r)
             return ok
 
@@ -364,8 +414,13 @@ def main():
         pt = wt.POINT()
         if user32.GetCursorPos(ctypes.byref(pt)):
             user32.SetCursorPos(pt.x, pt.y)
-        if debug_path:
-            log(f"refresh shown={bool(shown)} attach={attached}")
+        if dbg[0]:
+            cls = ctypes.create_unicode_buffer(64)
+            if fg:
+                user32.GetClassNameW(fg, cls, 64)
+            log(f"  다시 그리기: 앞 창={cls.value or '-'} 연결={'성공' if attached else '실패'} "
+                f"→ 화면 커서: {on_screen()}")
+            threading.Timer(0.08, lambda: log(f"  0.08초 뒤 화면 커서: {on_screen()}")).start()
 
     # 자동 점검: 커서를 한 번 바꿔 보고 되돌린 뒤 종료
     if check_mode:
@@ -394,8 +449,8 @@ def main():
         gen = 0
         while True:
             cmd, arg = q.get()
-            if debug_path:
-                log(f"worker got {cmd} {arg}")
+            if dbg[0]:
+                log({"down": "▼ 누름", "up": "▲ 뗌", "timeout": "⏱ 시간 끝", "quit": "끄기"}.get(cmd, cmd) + (f" #{arg}" if arg else ""))
             if cmd == "quit":
                 break
             if cmd == "down":
@@ -425,8 +480,6 @@ def main():
 
     @HOOKPROC
     def mouse_proc(n, wparam, lparam):
-        if debug_path and wparam != 0x0200:
-            log(f"hook n={n} msg={wparam:#x}")
         if n == 0:
             if wparam in DOWN:
                 q.put(("down", None))
